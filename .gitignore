@@ -1,0 +1,36 @@
+# ==========================
+# IntelliJ / VS Code
+# ==========================
+.idea/
+.vscode/
+
+# ==========================
+# Backend (Spring Boot)
+# ==========================
+nextnest-backend/target/
+nextnest-backend/.mvn/
+nextnest-backend/*.log
+
+# Application Config
+nextnest-backend/src/main/resources/application.properties
+
+# Upload Folder
+nextnest-backend/uploads/
+
+# ==========================
+# Frontend (React)
+# ==========================
+nextnest-frontend/node_modules/
+nextnest-frontend/build/
+
+# Env Files
+nextnest-frontend/.env
+nextnest-frontend/.env.local
+nextnest-frontend/.env.production
+nextnest-frontend/.env.development
+
+# ==========================
+# OS Files
+# ==========================
+.DS_Store
+Thumbs.db
