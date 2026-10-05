@@ -1,5 +1,6 @@
 package com.kgm.nextnest.model;
 
+import com.kgm.nextnest.security.MessageCryptoConverter;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
@@ -37,6 +38,7 @@ public class Inquiry {
             nullable = false,
             columnDefinition = "TEXT"
     )
+    @Convert(converter = MessageCryptoConverter.class)
     private String message;
 
     @Enumerated(EnumType.STRING)

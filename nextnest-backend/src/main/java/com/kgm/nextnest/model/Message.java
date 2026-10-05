@@ -1,5 +1,6 @@
 package com.kgm.nextnest.model;
 
+import com.kgm.nextnest.security.MessageCryptoConverter;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
@@ -39,6 +40,7 @@ public class Message {
             nullable = false,
             columnDefinition = "TEXT"
     )
+    @Convert(converter = MessageCryptoConverter.class)
     private String content;
 
     private Boolean isRead = false;

@@ -75,13 +75,12 @@ public class InquiryServiceImpl implements InquiryService {
 
 
     private InquiryResponse mapToResponse(Inquiry inquiry) {
-
         return InquiryResponse.builder()
                 .id(inquiry.getId())
-                .apartmentId(inquiry.getApartment().getId())
-                .apartmentTitle(inquiry.getApartment().getTitle())
-                .customerName(inquiry.getCustomer().getFullName())
-                .customerEmail(inquiry.getCustomer().getEmail())
+                .apartmentId(inquiry.getApartment() != null ? inquiry.getApartment().getId() : null)
+                .apartmentTitle(inquiry.getApartment() != null ? inquiry.getApartment().getTitle() : "Property Unavailable")
+                .customerName(inquiry.getCustomer() != null ? inquiry.getCustomer().getFullName() : "Unknown User")
+                .customerEmail(inquiry.getCustomer() != null ? inquiry.getCustomer().getEmail() : "Unknown Email")
                 .message(inquiry.getMessage())
                 .status(inquiry.getStatus())
                 .createdAt(inquiry.getCreatedAt())

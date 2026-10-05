@@ -14,6 +14,7 @@ import com.kgm.nextnest.service.EmailService;
 import com.kgm.nextnest.service.MessageService;
 import com.kgm.nextnest.service.NotificationService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.messaging.simp.SimpMessagingTemplate; // 1. Added import
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -22,29 +23,25 @@ import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
-public class MessageServiceImpl
-        implements MessageService {
+public class MessageServiceImpl implements MessageService {
 
     private final MessageRepository messageRepository;
-
     private final InquiryRepository inquiryRepository;
-
     private final UserRepository userRepository;
-
     private final EmailService emailService;
-
     private final NotificationService notificationService;
+    private final SimpMessagingTemplate messagingTemplate;
 
     @Override
-    public MessageResponse sendMessage(
-            MessageRequest request,
-            String senderEmail) {
+    public MessageResponse sendMessage(MessageRequest request, String senderEmail) {
 
         User sender = userRepository.findByEmail(senderEmail)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
         Inquiry inquiry = inquiryRepository.findById(request.getInquiryId())
                 .orElseThrow(() -> new RuntimeException("Inquiry not found"));
+
+        validateAccess(inquiry, sender);
 
         Message message = Message.builder()
                 .inquiry(inquiry)
@@ -53,82 +50,64 @@ public class MessageServiceImpl
                 .isRead(false)
                 .build();
 
-        Message savedMessage =
-                messageRepository.save(message);
+        Message savedMessage = messageRepository.save(message);
+        MessageResponse response = mapToResponse(savedMessage);
 
-        User receiver =
-                sender.getId().equals(
-                        inquiry.getCustomer().getId()
-                )
-                        ? inquiry.getApartment().getOwner()
-                        : inquiry.getCustomer();
+        User receiver = sender.getId().equals(inquiry.getCustomer().getId())
+                ? inquiry.getApartment().getOwner()
+                : inquiry.getCustomer();
+
+
+        messagingTemplate.convertAndSend(
+                "/topic/inquiries/" + inquiry.getId(),
+                response
+        );
+
+        messagingTemplate.convertAndSendToUser(
+                receiver.getEmail(),
+                "/queue/messages",
+                response
+        );
+
+
+        // NOTIFICATIONS & EMAIL
 
         notificationService.createNotification(
-
                 receiver,
-
                 "New Message",
-
-                sender.getFullName()
-                        + " sent you a message regarding "
-                        + inquiry.getApartment().getTitle(),
-
+                sender.getFullName() + " sent you a message regarding " + inquiry.getApartment().getTitle(),
                 "/messages/" + inquiry.getId()
         );
 
-        LocalDateTime now =
-                LocalDateTime.now();
-
-        boolean shouldSendEmail =
-
-                inquiry.getLastEmailNotificationSentAt() == null
-
-                        ||
-
-                        inquiry.getLastEmailNotificationSentAt()
-                                .isBefore(
-                                        now.minusHours(1)
-                                );
+        LocalDateTime now = LocalDateTime.now();
+        boolean shouldSendEmail = inquiry.getLastEmailNotificationSentAt() == null
+                || inquiry.getLastEmailNotificationSentAt().isBefore(now.minusHours(1));
 
         if (shouldSendEmail) {
-
             try {
-
                 emailService.sendNewMessageNotification(
-
                         receiver.getEmail(),
-
                         sender.getFullName(),
-
                         inquiry.getApartment().getTitle(),
-
                         request.getContent()
                 );
-
-                inquiry.setLastEmailNotificationSentAt(
-                        now
-                );
-
-                inquiryRepository.save(
-                        inquiry
-                );
-
+                inquiry.setLastEmailNotificationSentAt(now);
+                inquiryRepository.save(inquiry);
             } catch (Exception ex) {
-
                 ex.printStackTrace();
             }
         }
 
-        return mapToResponse(savedMessage);
+        return response;
     }
 
     @Override
     public List<MessageResponse> getMessages(Long inquiryId, String email) {
         User user = userRepository.findByEmail(email)
-                        .orElseThrow(() -> new RuntimeException("User not found"));
+                .orElseThrow(() -> new RuntimeException("User not found"));
 
         Inquiry inquiry = inquiryRepository.findById(inquiryId)
-                        .orElseThrow(() -> new RuntimeException("Inquiry not found"));
+                .orElseThrow(() -> new RuntimeException("Inquiry not found"));
 
         validateAccess(inquiry, user);
 
@@ -141,39 +120,15 @@ public class MessageServiceImpl
     @Override
     public void markAsRead(Long messageId, String email) {
         User user = userRepository.findByEmail(email)
-                        .orElseThrow(() -> new RuntimeException("User not found"));
+                .orElseThrow(() -> new RuntimeException("User not found"));
 
         Message message = messageRepository.findById(messageId)
-                        .orElseThrow(() -> new RuntimeException("Message not found"));
+                .orElseThrow(() -> new RuntimeException("Message not found"));
 
         Inquiry inquiry = message.getInquiry();
-
-        System.out.println(
-                "Logged User ID: " +
-                        user.getId()
-        );
-
-        System.out.println(
-                "Inquiry Customer ID: " +
-                        inquiry.getCustomer().getId()
-        );
-
-        System.out.println(
-                "Apartment Owner ID: " +
-                        inquiry.getApartment()
-                                .getOwner()
-                                .getId()
-        );
-
-        System.out.println(
-                "Role: " +
-                        user.getRole()
-        );
-
         validateAccess(inquiry, user);
 
         message.setIsRead(true);
-
         messageRepository.save(message);
     }
 
@@ -183,79 +138,41 @@ public class MessageServiceImpl
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
         List<Inquiry> inquiries;
-
         if (user.getRole() == RoleType.CUSTOMER) {
-
             inquiries = inquiryRepository.findByCustomer_Id(user.getId());
-
         } else if (user.getRole() == RoleType.OWNER) {
-
             inquiries = inquiryRepository.findByApartmentOwnerId(user.getId());
-
         } else {
-
             inquiries = inquiryRepository.findAll();
         }
 
         return inquiries.stream()
                 .map(inquiry -> {
-
                     Optional<Message> lastMessage = messageRepository.findFirstByInquiryIdOrderBySentAtDesc(inquiry.getId());
-
-                    String otherUserName;
-
-                    if (user.getRole() == RoleType.CUSTOMER) {
-
-                        otherUserName = inquiry.getApartment().getOwner().getFullName();
-
-                    } else {
-
-                        otherUserName = inquiry.getCustomer().getFullName();
-                    }
+                    String otherUserName = (user.getRole() == RoleType.CUSTOMER)
+                            ? inquiry.getApartment().getOwner().getFullName()
+                            : inquiry.getCustomer().getFullName();
 
                     return ConversationResponse.builder()
                             .inquiryId(inquiry.getId())
                             .apartmentId(inquiry.getApartment().getId())
                             .apartmentTitle(inquiry.getApartment().getTitle())
                             .otherUserName(otherUserName)
-                            .lastMessage(lastMessage
-                                    .map(Message::getContent)
-                                            .orElse("")
-                            )
-                            .lastMessageTime(lastMessage
-                                            .map(Message::getSentAt)
-                                            .orElse(null)
-                            )
-
+                            .lastMessage(lastMessage.map(Message::getContent).orElse(""))
+                            .lastMessageTime(lastMessage.map(Message::getSentAt).orElse(null))
                             .unreadCount(messageRepository.countByInquiryIdAndIsReadFalse(inquiry.getId()))
                             .build();
-
                 })
-                .sorted(
-                        (a, b) -> {
-
-                            if (
-                                    a.getLastMessageTime() == null
-                            ) return 1;
-
-                            if (
-                                    b.getLastMessageTime() == null
-                            ) return -1;
-
-                            return b.getLastMessageTime()
-                                    .compareTo(
-                                            a.getLastMessageTime()
-                                    );
-                        }
-                )
-
+                .sorted((a, b) -> {
+                    if (a.getLastMessageTime() == null) return 1;
+                    if (b.getLastMessageTime() == null) return -1;
+                    return b.getLastMessageTime().compareTo(a.getLastMessageTime());
+                })
                 .toList();
     }
 
     private MessageResponse mapToResponse(Message message) {
-
         return MessageResponse.builder()
-
                 .id(message.getId())
                 .senderId(message.getSender().getId())
                 .senderName(message.getSender().getFullName())
@@ -266,15 +183,11 @@ public class MessageServiceImpl
     }
 
     private void validateAccess(Inquiry inquiry, User user) {
-
         boolean isCustomer = inquiry.getCustomer().getId().equals(user.getId());
-
         boolean isOwner = inquiry.getApartment().getOwner().getId().equals(user.getId());
-
         boolean isAdmin = user.getRole() == RoleType.ADMIN;
 
         if (!isCustomer && !isOwner && !isAdmin) {
-
             throw new RuntimeException("Access denied");
         }
     }

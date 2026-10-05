@@ -167,6 +167,7 @@ public class SecurityConfig {
                                 "/swagger-ui/**").permitAll()
                         .requestMatchers(
                                 "/v3/api-docs/**").permitAll()
+                        .requestMatchers("/ws/**").permitAll()
 
                         // Everything Else
                         .anyRequest()
